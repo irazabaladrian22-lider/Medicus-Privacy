@@ -1,0 +1,4 @@
+2026-05-26 02:50:32.879 | WARNING  | Módulos reales no encontrados. Usando simuladores (mocks). Error: No module named 'modules'
+2026-05-26 02:50:32.895 | INFO     | Inicio de Medicus-Privacy v1.0.0
+2026-05-26 02:51:20.633 | INFO     | AUDITORIA | Acceso CONCEDIDO | Usuario: admin | Rol: Admin | ID: 1
+2026-05-26 02:51:20.634 | INFO     | El sistema ha finalizado su ejecución
