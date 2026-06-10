@@ -1,25 +1,29 @@
-"""
-Módulo Principal: Medicus-Privacy
-Orquestador que integra autenticación, base de datos y gestión de citas médicas.
+﻿"""
+Modulo Principal: Medicus-Privacy
+Orquestador que integra autenticaciÃ³n, base de datos y gestiÃ³n de citas mÃ©dicas.
 """
 
 import sys
-import datetime
 import os
 import logging
+import getpass
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # ==============================================================================
-# CONFIGURACIÓN GLOBAL
+# CONFIGURACION GLOBAL
 # ==============================================================================
 
-# Nombre y versión de la aplicación
+# Nombre y version de la aplicacion
 APP_NAME = "Medicus-Privacy"
 APP_VERSION = "1.0.0"
 
-# Carpeta donde se guardarán los archivos de log
-LOG_DIR = Path("logs")
+BASE_DIR = Path(__file__).resolve().parents[2]
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+# Carpeta donde se guardaran los archivos de log
+LOG_DIR = BASE_DIR / "logs"
 LOG_DIR.mkdir(exist_ok=True)  # Crea la carpeta si no existe
 
 # Archivo de log completo
@@ -32,19 +36,21 @@ LOG_FILE = LOG_DIR / "medicus_audit.log"
 def setup_logging():
     """
     Configura el sistema de registro de eventos.
-    Los logs se guardan en archivos rotativos (máximo 10MB por archivo).
+    Los logs se guardan en archivos rotativos (mÃ¡ximo 10MB por archivo).
     """
-    # Crea un logger con el nombre de la aplicación
+    # Crea un logger con el nombre de la aplicaciÃ³n
     logger = logging.getLogger(APP_NAME)
     logger.setLevel(logging.INFO)  # Nivel INFO: registra eventos importantes
+    if logger.handlers:
+        return logger
     
-    # Rotación de logs: cuando llegue a 10MB, crea un archivo nuevo
-    # backupCount=5 guarda los últimos 5 archivos de log
+    # Rotacion de logs: cuando llegue a 10MB, crea un archivo nuevo
+    # backupCount=5 guarda los Ãºltimos 5 archivos de log
     handler = RotatingFileHandler(
         LOG_FILE, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8'
     )
     
-    # Formato de cada línea de log: fecha | nivel | mensaje
+    # Formato de cada linea de log: fecha | nivel | mensaje
     formatter = logging.Formatter(
         '%(asctime)s.%(msecs)03d | %(levelname)-8s | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -52,7 +58,7 @@ def setup_logging():
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     
-    # También muestra los logs en consola para facilitar la depuración
+    # Tambien muestra los logs en consola para facilitar la depuracion
     console = logging.StreamHandler()
     console.setLevel(logging.DEBUG)  # En consola se ven todos los niveles
     console.setFormatter(formatter)
@@ -60,62 +66,52 @@ def setup_logging():
     
     return logger
 
-# Configura el logger al iniciar el módulo
+# Configura el logger al iniciar el modulo
 logger = setup_logging()
 
 # ==============================================================================
-# IMPORTACIÓN DE MÓDULOS (Servicios reales o simulados)
+# IMPORTACION DE MODULOS (Servicios reales o simulados)
 # ==============================================================================
 
-# Intenta importar los módulos reales del proyecto
+# Intenta importar los modulos reales del proyecto
 try:
-    from modules.auth import AuthService as RealAuth
-    from modules.database import DatabaseService
-    auth_service = RealAuth()
-    logger.info("Módulos reales cargados correctamente")
-    
+    from medicus_privacy.modules.auth import AuthService
+
+    auth_service = AuthService()
+    logger.info("Modulo de autenticacion cargado correctamente")
 except ImportError as e:
-    # Si no están disponibles, usa versiones simuladas para desarrollo
-    logger.warning(f"Módulos reales no encontrados. Usando simuladores (mocks). Error: {e}")
-    
-    # Simulador de autenticación para pruebas
-    class MockAuth:
-        @staticmethod
-        def verificar_credenciales(usuario, password):
-            """
-            Verifica credenciales de acceso.
-            Retorna: (éxito, rol, datos_usuario)
-            """
-            # Credenciales de prueba (solo para desarrollo)
-            if usuario == "admin" and password == "admin123":
-                return True, "Admin", {"user_id": 1, "nombre": "Admin Sistema"}
-            if usuario == "medico" and password == "med123":
-                return True, "Medico", {"user_id": 2, "nombre": "Dr. García"}
-            if usuario == "paciente" and password == "pac123":
-                return True, "Paciente", {"user_id": 3, "nombre": "María López"}
-            
-            # Credenciales incorrectas
-            return False, None, None
-    
-    auth_service = MockAuth()
+    logger.critical(f"No se pudo cargar el modulo de autenticacion: {e}")
+    raise
+except Exception as e:
+    logger.critical(f"Error configurando autenticacion: {e}", exc_info=True)
+    raise
+
 
 # ==============================================================================
 # FUNCIONES AUXILIARES (Utilidades)
 # ==============================================================================
 
 def limpiar_pantalla():
-    """Limpia la consola. Funciona en Windows (nt) y Linux/Mac."""
     os.system('cls' if os.name == 'nt' else 'clear')
 
 def mostrar_banner():
-    """Muestra el encabezado de la aplicación con nombre y versión."""
+    """Muestra el encabezado de la aplicacion con nombre y version."""
     limpiar_pantalla()
     print(f"""
     {'='*60}
     {APP_NAME} v{APP_VERSION}
-    Sistema de Gestión de Citas Médicas con Privacidad por Diseño
+    Sistema de Gestion de Citas Medicas con Privacidad
     {'='*60}
     """)
+
+
+def solicitar_password():
+    """Solicita la contrasena de forma oculta, con fallback para consolas limitadas."""
+    try:
+        return getpass.getpass("Contrasena (no se mostrara al escribir): ")
+    except Exception:
+        print("Aviso: esta consola no permite ocultar la contrasena.")
+        return input("Contrasena: ")
 
 # ==============================================================================
 # FLUJO PRINCIPAL DEL PROGRAMA
@@ -140,9 +136,7 @@ def main():
             print("\n=== ACCESO AL SISTEMA ===")
             usuario = input("Usuario: ").strip()  # .strip() elimina espacios en blanco
             
-            # En producción se usaría getpass para ocultar la contraseña
-            # getpass.getpass("Contraseña: ")
-            password = input("Contraseña: ")
+            password = solicitar_password()
             
             # Validación básica: el usuario no puede estar vacío
             if not usuario:
@@ -158,21 +152,29 @@ def main():
                 
                 # Muestra mensaje de bienvenida personalizado
                 nombre_usuario = datos_usuario.get('nombre', usuario)
-                print(f"\n✅ Bienvenido, {nombre_usuario}")
+                print(f"\n Bienvenido, {nombre_usuario}")
                 print(f"Rol asignado: {rol}")
                 
                 # Redirige al menú correspondiente según el rol
                 if rol == "Admin":
-                    print("🔧 Accediendo al panel de administración...")
+                    print("Accediendo al panel de administración...")
                     # Aquí se llamaría: menu_administrador(datos_usuario)
                     
                 elif rol == "Medico":
-                    print("👨‍⚕️ Accediendo al panel médico...")
+                    print(" Accediendo al panel médico...")
                     # Aquí se llamaría: menu_medico(datos_usuario)
+
+                elif rol == "Recepcionista":
+                    print("Accediendo al panel de recepcion...")
+                    # Aquí se llamaría: menu_recepcionista(datos_usuario)
+
+                elif rol == "Estudiante":
+                    print("Accediendo al panel de estudiante...")
+                    # Aquí se llamaría: menu_estudiante(datos_usuario)
                     
                 else:
-                    print("ℹ️ Accediendo al panel de paciente...")
-                    # Aquí se llamaría: menu_paciente(datos_usuario)
+                    logger.error(f"Rol autenticado sin menu asignado: {rol}")
+                    print("Error: rol sin menu asignado. Contacte al administrador.")
                 
                 break  # Sale del bucle de login
                 
@@ -184,26 +186,26 @@ def main():
                 # Registro de auditoría para intentos fallidos
                 logger.warning(f"AUDITORIA | Acceso DENEGADO | Usuario: {usuario} | Intento {intentos_fallidos}/{MAX_INTENTOS}")
                 
-                print(f"\n❌ Usuario o contraseña incorrectos")
+                print(f"\n Usuario o contraseña incorrectos")
                 print(f"Intentos restantes: {restantes}")
                 
-                # Si supera el máximo de intentos, cierra el sistema
+                # Si supera el mÃ¡ximo de intentos, cierra el sistema
                 if intentos_fallidos >= MAX_INTENTOS:
-                    logger.critical(f"SEGURIDAD | Usuario bloqueado temporalmente: {usuario} | Máximos intentos alcanzados")
-                    print("\n🔒 Demasiados intentos fallidos. El sistema se cerrará por seguridad.")
+                    logger.critical(f"SEGURIDAD | Usuario bloqueado temporalmente: {usuario} | Maximos intentos alcanzados")
+                    print("\n Demasiados intentos fallidos. El sistema se cerrara¡ por seguridad.")
                     input("Presione Enter para salir...")
-                    sys.exit(1)  # Cierra el programa con código de error
+                    sys.exit(1)  # Cierra el programa con cÃ³digo de error
         
     except KeyboardInterrupt:
-        # El usuario presionó Ctrl+C
+        # El usuario presionaddd Ctrl+C
         logger.info("Sistema detenido manualmente por el usuario (Ctrl+C)")
-        print("\n\n👋 Saliendo del sistema...")
+        print("\n\n Saliendo del sistema...")
         sys.exit(0)  # Cierra el programa normalmente
         
     except Exception as e:
         # Cualquier otro error inesperado
         logger.critical(f"Error fatal no manejado: {e}", exc_info=True)
-        print(f"\n💥 Error crítico en el sistema. Contacte al administrador.")
+        print(f"\n Error crítico en el sistema. Contacte al administrador.")
         print(f"Código de referencia: {type(e).__name__}")
         sys.exit(1)  # Cierra con código de error
         

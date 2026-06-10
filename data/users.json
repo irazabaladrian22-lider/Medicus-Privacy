@@ -1,0 +1,40 @@
+{
+  "usuarios": [
+    {
+      "user_id": 1,
+      "usuario": "admin",
+      "nombre": "Admin Sistema",
+      "rol": "Admin",
+      "activo": true,
+      "salt": "645fc941b7805a07595f6f0fe9da1d85",
+      "password_hash": "235591a344b10ff6b25c3f0b092d98fc6938b9d7e4efdd5f925218dd79068189"
+    },
+    {
+      "user_id": 2,
+      "usuario": "medico",
+      "nombre": "Dr. Garcia",
+      "rol": "Medico",
+      "activo": true,
+      "salt": "aa87b4cfe17c4cbc877e7bf655bfd4a3",
+      "password_hash": "0a4d18573ded9f3a3c16a39f5b13305d6c363a5c8b9a16369f8c0d8505f4acf9"
+    },
+    {
+      "user_id": 3,
+      "usuario": "recepcion",
+      "nombre": "Recepcion Principal",
+      "rol": "Recepcionista",
+      "activo": true,
+      "salt": "c3057c97c4d2a411574588a73283b102",
+      "password_hash": "e29dc5c4d23eeaafb4c3fa8c5076a95f8c2a785001a4f94a433b5b62acc10668"
+    },
+    {
+      "user_id": 4,
+      "usuario": "estudiante",
+      "nombre": "Estudiante Demo",
+      "rol": "Estudiante",
+      "activo": true,
+      "salt": "5bb09be0f3f7461e00fe135647f937d2",
+      "password_hash": "1418ca9d7a4bd4eb5c6caaf668ba6764c8815d1e7b2317e0c518d7fe48101918"
+    }
+  ]
+}
