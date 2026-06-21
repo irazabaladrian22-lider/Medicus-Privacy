@@ -200,4 +200,126 @@ python -m py_compile medicus_privacy/Main/Main.py medicus_privacy/modules/auth.p
 - Agregar pruebas automatizadas con `unittest` o `pytest`.
 - Corregir textos con caracteres danados por codificacion en archivos antiguos.
 
+# Medicus-Privacy 🛡️🩺
+
+**Medicus-Privacy** es un sistema modular en Python diseñado para la gestión de usuarios, programación de citas médicas y protección estricta de la privacidad mediante criptografía. El sistema está estructurado bajo una arquitectura de "caja negra" dividida en estaciones de trabajo para facilitar la colaboración en equipo.
+
+Este repositorio contiene la implementación de los tres módulos principales:
+1. **Seguridad e Integridad** (`seguridad.py`)
+2. **Administración de Usuarios** (`admin.py`)
+3. **Gestión de Reservas y Citas** (`citas.py`)
+
+---
+
+## 📂 Arquitectura de Archivos
+
+* `seguridad.py`: Proporciona las funciones de criptografía simétrica y hashing de contraseñas.
+* `admin.py`: Gestiona la base de datos de usuarios, altas, bajas, roles y contraseñas.
+* `citas.py`: Gestiona la agenda, verifica disponibilidad médica y encripta datos sensibles.
+* `db_medicus.json`: Archivo de persistencia de datos (base de datos JSON).
+* `test_admin.py` y `test_citas.py`: Scripts de pruebas automatizadas para garantizar la calidad del código.
+
+---
+
+## 🛠️ Detalle de los Módulos
+
+### 1. 🔒 Módulo de Seguridad (`seguridad.py`)
+Es la "caja fuerte" del sistema. No tiene dependencias externas y provee seguridad criptográfica robusta.
+
+* **Funciones principales**:
+  * `hash_password(password: str) -> str`: Genera un hash seguro con sal (salt) usando PBKDF2-HMAC-SHA256 para contraseñas.
+  * `verificar_password(password: str, password_hash: str) -> bool`: Compara contraseñas usando algoritmos en tiempo constante contra ataques de canal lateral.
+  * `cifrar_datos(texto: str, clave: str) -> str`: Cifra textos planos (como diagnósticos) con cifrado de flujo simétrico, generando un IV aleatorio y un código MAC (HMAC-SHA256) para asegurar la integridad.
+  * `descifrar_datos(texto_cifrado_b64: str, clave: str) -> str`: Descifra y verifica la integridad del texto. Lanza un `ValueError` si la clave es incorrecta o los datos fueron alterados.
+
+---
+
+### 2. 👥 Módulo de Administración (`admin.py`)
+Controla la administración del personal de la clínica y sus roles (`Admin`, `Recep`, `Médico`, `Estudiante`).
+
+* **Funciones de Negocio**:
+  * `crear_usuario(username, password, rol, nombre_completo)`: Registra un usuario y hace hash de su contraseña.
+  * `eliminar_usuario(username)`: Elimina un usuario (protege contra la eliminación del único Administrador).
+  * `listar_usuarios()`: Retorna información básica sin exponer contraseñas.
+  * `actualizar_rol_usuario(username, nuevo_rol)`: Actualiza permisos.
+* **Interfaz de Consola**:
+  * `mostrar_menu_admin()`: Menú interactivo CLI para la gestión rápida de usuarios.
+
+---
+
+### 3. 📅 Módulo de Citas y Reservas (`citas.py`)
+Gestiona el calendario, la disponibilidad de los médicos y el agendamiento seguro.
+
+* **Funciones de Negocio**:
+  * `agendar_cita(medico_username, alumno_username, fecha, hora, especialidad, motivo_sensible, clave_seguridad)`: Crea una cita. Si se pasa un motivo, lo cifra con la clave de seguridad a través de `seguridad.py`.
+  * `verificar_disponibilidad(medico_username, fecha, hora)`: Valida colisiones de horario (un médico no puede duplicar citas en el mismo bloque).
+  * `cancelar_cita(cita_id)`: Cancela y libera el horario del médico.
+  * `obtener_citas_filtradas(rol_usuario, username)`: Filtra citas automáticamente según el rol del usuario conectado.
+  * `descifrar_motivo_cita(cita, clave_seguridad)`: Permite descifrar el motivo médico de forma controlada.
+* **Interfaz de Consola**:
+  * `mostrar_menu_citas(username_actual, rol_actual)`: Menú CLI adaptado al rol del usuario (por ejemplo, el Estudiante agenda y ve sus citas; el Médico puede descifrar los diagnósticos introduciendo su clave privada).
+
+---
+
+## 🗄️ Estructura de la Base de Datos (`db_medicus.json`)
+
+El archivo JSON almacena los registros estructurados con la siguiente forma:
+
+```json
+{
+  "usuarios": {
+    "admin": {
+      "password_hash": "salt$hash_de_prueba",
+      "rol": "Admin",
+      "nombre_completo": "Administrador Principal"
+    }
+  },
+  "citas": [
+    {
+      "id": "1",
+      "medico": "nombre_medico",
+      "alumno": "nombre_estudiante",
+      "fecha": "YYYY-MM-DD",
+      "hora": "HH:MM",
+      "especialidad": "Odontología",
+      "motivo": "TextoCifradoEnBase64...",
+      "cifrado": true,
+      "estado": "Programada"
+    }
+  ]
+}
+```
+
+---
+
+## 🚀 Cómo Ejecutar e Integrar
+
+### Ejecución de Pruebas Unitarias
+Para validar que todo el backend y cifrado funcionan correctamente, ejecuta:
+```bash
+python test_admin.py
+python test_citas.py
+```
+
+### Ejecutar Módulos de Forma Autónoma
+Cada módulo cuenta con un bloque ejecutable para pruebas individuales:
+* Ejecutar Administración: `python admin.py`
+* Ejecutar Reservas: `python citas.py`
+* *Nota: Puedes iniciar sesión usando el usuario por defecto `admin` y la contraseña `admin123`.*
+
+### Guía de Integración para el Director (`main.py`)
+Para conectar estas piezas en el menú principal (`main.py`), solo debes importar las funciones de interfaz:
+
+```python
+from admin import mostrar_menu_admin
+from citas import mostrar_menu_citas
+
+# Ejemplo de flujo tras autenticar al usuario:
+if rol == "Admin":
+    # Muestra el panel de administración
+    mostrar_menu_admin()
+elif rol in ["Médico", "Estudiante", "Recep"]:
+    # Muestra la agenda adaptada a sus permisos
+    mostrar_menu_citas(usuario_actual, rol)
+```
 
