@@ -1,0 +1,10 @@
+{
+  "usuarios": {
+    "admin": {
+      "password_hash": "03e8021a735db1c3aa2e61d8ea4102a1$f367f993e8463567a4d650d30fb1ec892faa921c19c0ca9bb5ddaf4a78bf3d56",
+      "rol": "Admin",
+      "nombre_completo": "Administrador Principal"
+    }
+  },
+  "citas": []
+}
