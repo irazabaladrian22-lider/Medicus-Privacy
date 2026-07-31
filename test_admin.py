@@ -1,121 +1,98 @@
-"""
-Script de pruebas automatizadas para admin.py
-"""
+import unittest
+from pathlib import Path
 
-import os
-import json
-import admin
-import seguridad
-
-# Rutas para el respaldo de la base de datos durante las pruebas
-DB_PATH = admin.DB_PATH
-DB_BACKUP_PATH = DB_PATH + ".backup"
+from medicus_privacy.modules.admin import AdminService
+from medicus_privacy.modules.roles import ADMIN, ESTUDIANTE, MEDICO
 
 
-def respaldar_db():
-    """Respalda la base de datos actual para no perder datos reales."""
-    if os.path.exists(DB_PATH):
-        os.rename(DB_PATH, DB_BACKUP_PATH)
+class AdminTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.db_path = Path(__file__).resolve().parent / ".test_admin.db"
 
+    @classmethod
+    def tearDownClass(cls):
+        cls.db_path.unlink(missing_ok=True)
 
-def restaurar_db():
-    """Restaura la base de datos original."""
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-    if os.path.exists(DB_BACKUP_PATH):
-        os.rename(DB_BACKUP_PATH, DB_PATH)
+    def setUp(self):
+        self.db_path.unlink(missing_ok=True)
+        self.service = AdminService(ADMIN, self.db_path)
 
+    def test_create_edit_status_and_no_password_exposure(self):
+        success, message = self.service.crear_usuario(
+            "doctor_test",
+            "Medico123",
+            MEDICO,
+            "Doctor Test",
+            "Cardiologia",
+        )
+        self.assertTrue(success, message)
+        doctor = next(
+            user
+            for user in self.service.listar_usuarios()
+            if user["username"] == "doctor_test"
+        )
+        self.assertNotIn("password_hash", doctor)
+        self.assertEqual(doctor["especialidad"], "Cardiologia")
 
-def ejecutar_pruebas():
-    print("=== INICIANDO PRUEBAS DE ADMIN.PY ===")
-    
-    respaldar_db()
-    
-    try:
-        # 1. Asegurar base de datos inicializada
-        db = admin.cargar_db()
-        print("[1] Base de datos cargada/inicializada correctamente.")
-        assert "admin" in db["usuarios"], "Error: El usuario admin por defecto debería estar presente."
-        assert db["usuarios"]["admin"]["rol"] == "Admin", "Error: Rol de admin incorrecto."
-        
-        # 2. Probar creación de nuevos usuarios
-        print("\n[2] Probando crear_usuario():")
-        
-        # Médico
-        exito, msg = admin.crear_usuario("medico_test", "medico123", "Médico", "Dr. Carlos Test")
-        print(f"    Crear Médico: {exito} - {msg}")
-        assert exito is True, f"Error al crear médico: {msg}"
-        
-        # Estudiante
-        exito, msg = admin.crear_usuario("estudiante_test", "alumno123", "Estudiante", "Juan Alumno Test")
-        print(f"    Crear Estudiante: {exito} - {msg}")
-        assert exito is True, f"Error al crear estudiante: {msg}"
-        
-        # Recepción
-        exito, msg = admin.crear_usuario("recep_test", "recep123", "Recep", "María Recepción Test")
-        print(f"    Crear Recep: {exito} - {msg}")
-        assert exito is True, f"Error al crear recep: {msg}"
-        
-        # 3. Validar duplicados y restricciones
-        print("\n[3] Probando validaciones y casos incorrectos:")
-        
-        # Duplicado
-        exito, msg = admin.crear_usuario("medico_test", "otra123", "Médico", "Duplicado")
-        print(f"    Intentar duplicado: {exito} - {msg}")
-        assert exito is False, "Error: Se permitió crear un usuario duplicado."
-        
-        # Rol inválido
-        exito, msg = admin.crear_usuario("otro_test", "pass123", "SuperAdmin", "Usuario Inválido")
-        print(f"    Intentar rol no autorizado: {exito} - {msg}")
-        assert exito is False, "Error: Se permitió crear un usuario con un rol no registrado."
-        
-        # Contraseña corta
-        exito, msg = admin.crear_usuario("corto", "12", "Médico", "Corto")
-        print(f"    Intentar pass corto: {exito} - {msg}")
-        assert exito is False, "Error: Se permitió crear un usuario con contraseña corta."
+        success, message = self.service.actualizar_usuario(
+            "doctor_test",
+            "Doctor Editado",
+            ESTUDIANTE,
+            "Pediatria",
+        )
+        self.assertTrue(success, message)
+        edited = next(
+            user
+            for user in self.service.listar_usuarios()
+            if user["username"] == "doctor_test"
+        )
+        self.assertEqual(edited["nombre_completo"], "Doctor Editado")
+        self.assertEqual(edited["rol"], ESTUDIANTE)
+        self.assertEqual(edited["especialidad"], "Pediatria")
 
-        # 4. Probar listar usuarios
-        print("\n[4] Probando listar_usuarios():")
-        usuarios = admin.listar_usuarios()
-        print(f"    Lista obtenida: {usuarios}")
-        nombres_usuario = [u["username"] for u in usuarios]
-        assert "medico_test" in nombres_usuario, "Error: medico_test no se encuentra en la lista."
-        assert "estudiante_test" in nombres_usuario, "Error: estudiante_test no se encuentra en la lista."
-        print("    -> OK: Listado de usuarios validado.")
+        self.assertTrue(self.service.eliminar_usuario("doctor_test")[0])
+        self.assertTrue(self.service.activar_usuario("doctor_test")[0])
 
-        # 5. Probar actualización de roles
-        print("\n[5] Probando actualizar_rol_usuario():")
-        exito, msg = admin.actualizar_rol_usuario("recep_test", "Admin")
-        print(f"    Cambiar rol: {exito} - {msg}")
-        assert exito is True, f"Error al actualizar rol: {msg}"
-        
-        db_actual = admin.cargar_db()
-        assert db_actual["usuarios"]["recep_test"]["rol"] == "Admin", "Error: Rol no se actualizó en la BD."
-        print("    -> OK: Cambio de rol validado.")
+    def test_clinical_roles_require_specialty(self):
+        success, _ = self.service.crear_usuario(
+            "doctor_test",
+            "Medico123",
+            MEDICO,
+            "Doctor Test",
+        )
+        self.assertFalse(success)
+        success, _ = self.service.crear_usuario(
+            "doctor_test",
+            "Medico123",
+            MEDICO,
+            "Doctor Test",
+            "Especialidad inventada",
+        )
+        self.assertFalse(success)
 
-        # 6. Probar eliminación de usuarios (Baja)
-        print("\n[6] Probando eliminar_usuario():")
-        
-        # Eliminar recep_test (ahora Admin temporal)
-        exito, msg = admin.eliminar_usuario("recep_test")
-        print(f"    Eliminar usuario existente: {exito} - {msg}")
-        assert exito is True, f"Error al eliminar usuario: {msg}"
-        
-        # Intentar eliminar único administrador (admin)
-        exito, msg = admin.eliminar_usuario("admin")
-        print(f"    Intentar eliminar único Admin principal: {exito} - {msg}")
-        assert exito is False, "Error: Se permitió eliminar al único Administrador."
-        
-        # Intentar eliminar inexistente
-        exito, msg = admin.eliminar_usuario("invalido_test")
-        print(f"    Intentar eliminar inexistente: {exito} - {msg}")
-        assert exito is False, "Error: Se reportó éxito al eliminar usuario inexistente."
-        
-        print("\n=== ¡TODAS LAS PRUEBAS DE ADMIN.PY PASARON EXITOSAMENTE! ===")
-        
-    finally:
-        restaurar_db()
+    def test_cannot_demote_or_remove_last_admin(self):
+        success, _ = self.service.actualizar_usuario(
+            "admin",
+            "Admin Sistema",
+            ESTUDIANTE,
+            "Medicina Interna",
+        )
+        self.assertFalse(success)
+        self.assertFalse(self.service.eliminar_usuario("admin")[0])
+
+    def test_non_admin_is_rejected(self):
+        service = AdminService(ESTUDIANTE, self.db_path)
+        success, _ = service.crear_usuario(
+            "intruso",
+            "Password123",
+            MEDICO,
+            "Sin Permiso",
+            "Cardiologia",
+        )
+        self.assertFalse(success)
+        self.assertEqual(service.listar_usuarios(), [])
 
 
 if __name__ == "__main__":
-    ejecutar_pruebas()
+    unittest.main(verbosity=2)

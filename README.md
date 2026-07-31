@@ -1,275 +1,236 @@
-# Documentacion actual de Medicus-Privacy
+# Medicus-Privacy
 
-## Estado general
+Aplicación de escritorio hospitalaria para administrar personal, pacientes,
+citas e historias clínicas con autenticación por roles, SQLite y cifrado
+AES-256-GCM.
 
-Por ahora el proyecto es una aplicacion de consola en Python. La parte funcional implementada es la seccion de **Recepcion/Login**, encargada de validar quien entra al sistema y que rol tiene.
+# Integrantes del equipo
 
-El flujo principal esta en `medicus_privacy/Main/Main.py`. Ese archivo muestra el banner, solicita usuario y contrasena, valida las credenciales usando el modulo de autenticacion y redirige segun el rol.
+- Adrian Irazabal 30.458.791
+- ⁠Andrés Jesús Ramos 30.507.057
+- Dylan Isava
+- ⁠Wilmer Joel Pérez González 24.331.903
 
-## Estructura actual
+## Instalación y ejecución
+
+Desde `Medicus-Privacy-main`:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m medicus_privacy.gui.app
+```
+
+En el IDE seleccione `.venv\Scripts\python.exe`, use
+`Medicus-Privacy-main` como directorio de trabajo y ejecute el módulo
+`medicus_privacy.gui.app`.
+
+## Usuarios iniciales
+
+Una base nueva incluye:
+
+| Usuario      | Contraseña | Rol           | Especialidad     |
+| ------------ | ---------- | ------------- | ---------------- |
+| `admin`      | `admin123` | Admin         | No aplica        |
+| `medico`     | `med123`   | Médico        | Medicina Interna |
+| `recepcion`  | `rec123`   | Recepcionista | No aplica        |
+| `estudiante` | `est123`   | Estudiante    | Medicina Interna |
+
+Estas credenciales son solo para desarrollo. Una migración conserva el estado
+activo o inactivo que ya tenía cada cuenta.
+
+## Navegación y permisos
+
+| Rol           | Paneles                    | Acciones                                                                                |
+| ------------- | -------------------------- | --------------------------------------------------------------------------------------- |
+| Admin         | Usuarios, Citas, Pacientes | Gestiona perfiles y opera cualquier cita; no ve contenido clínico.                      |
+| Recepcionista | Citas, Pacientes           | Registra pacientes, agenda y cancela cualquier cita; no ve contenido clínico.           |
+| Médico        | Citas, Historias clínicas  | Agenda y cancela sus consultas, registra evoluciones y consulta historias relacionadas. |
+| Estudiante    | Citas, Historias clínicas  | Ve citas asignadas y, después de ser atendidas, historias en modo lectura.              |
+
+El paciente no tiene cuenta ni inicia sesión. Es un registro administrativo y
+clínico independiente del personal hospitalario.
+
+## Flujo de citas
+
+1. Seleccionar una especialidad.
+2. Elegir un médico activo de esa especialidad.
+3. Admin o Recepción pueden asignar opcionalmente un estudiante de la misma
+   especialidad.
+4. Buscar al paciente por cédula. Si no existe, registrar nombres, apellidos,
+   fecha de nacimiento y sexo.
+5. Seleccionar una fecha desde el calendario y una hora entre 07:00 y 19:00 en
+   intervalos de 30 minutos.
+
+La capa de servicios vuelve a validar permisos, especialidad, fecha futura y
+colisiones de médico, paciente o estudiante. No es posible evitar estas reglas
+modificando la interfaz.
+
+## Historias clínicas
+
+El médico accede a Historias clínicas desde el menú lateral. Cada historia
+contiene los datos del paciente y una secuencia de evoluciones con:
+
+- Fecha, médico y especialidad.
+- Altura y peso.
+- Diagnóstico.
+- Conducta y/o tratamiento.
+
+Para agregar una evolución debe existir una cita programada del paciente con
+el médico autenticado. Al guardar, la cita pasa a `Atendida`. El botón
+`Próxima consulta` permite agendar el seguimiento.
+
+Un médico relacionado mediante una cita programada o atendida puede consultar
+la historia completa para mantener continuidad clínica. El estudiante obtiene
+acceso de solo lectura únicamente después de atender una cita en la que fue
+asignado.
+
+## Privacidad
+
+- Las contraseñas usan PBKDF2-HMAC-SHA256 con sal aleatoria.
+- Diagnósticos y tratamientos se cifran individualmente con AES-256-GCM.
+- La clave clínica es generada por la aplicación y protegida mediante Windows
+  DPAPI en `%LOCALAPPDATA%\MedicusPrivacy\clinical.key`.
+- La clave no se guarda en SQLite ni se solicita al usuario.
+- Admin y Recepción son rechazados por `ClinicalHistoryService`, aunque se
+  intente invocar el servicio sin usar la GUI.
+- Las consultas y escrituras clínicas se auditan sin registrar su contenido.
+
+La protección de la clave con DPAPI está diseñada para el despliegue actual en
+Windows. En pruebas puede inyectarse `MEDICUS_MASTER_KEY` en Base64.
+
+## Generación segura de contraseñas
+
+### `generar_hash_password(password)` / `hash_password(password)`
+
+```python
+from medicus_privacy.modules.seguridad import hash_password
+
+password_hash = hash_password("ContrasenaTemporal123")
+```
+
+Ubicación: `medicus_privacy/modules/seguridad.py`.
+
+La función recibe una contraseña en texto plano y devuelve una cadena preparada
+para persistirse en `usuarios.password_hash`. Internamente:
+
+1. Genera una sal aleatoria de 16 bytes.
+2. Aplica PBKDF2-HMAC-SHA256 con 600.000 iteraciones.
+3. Devuelve algoritmo, iteraciones, sal y resultado codificados en una sola
+   cadena:
 
 ```text
-Medicus-Privacy-main/
-+-- data/
-|   +-- users.json
-+-- logs/
-|   +-- medicus_audit.log
-+-- medicus_privacy/
-|   +-- Main/
-|   |   +-- __init__.py
-|   |   +-- Main.py
-|   +-- modules/
-|   |   +-- __init__.py
-|   |   +-- auth.py
-|   +-- __init__.py
-+-- README.md
+pbkdf2_sha256$600000$<sal_hexadecimal>$<hash_hexadecimal>
 ```
 
-## Que hace el codigo
-
-### `Main.py`
-
-Es el punto de entrada del sistema.
-
-Responsabilidades principales:
-
-- Configura el nombre y version de la aplicacion.
-- Configura el sistema de logs en `logs/medicus_audit.log`.
-- Carga el servicio real de autenticacion `AuthService`.
-- Muestra el banner de bienvenida.
-- Solicita usuario y contrasena.
-- Permite hasta 3 intentos fallidos.
-- Registra accesos concedidos y denegados.
-- Redirige segun el rol autenticado:
-  - `Admin`
-  - `Medico`
-  - `Recepcionista`
-  - `Estudiante`
-
-### `auth.py`
-
-Contiene el servicio real de autenticacion.
-
-Responsabilidades principales:
-
-- Cargar usuarios desde `data/users.json`.
-- Buscar un usuario por nombre de usuario.
-- Verificar si el usuario esta activo.
-- Validar que el rol sea permitido.
-- Comparar la contrasena ingresada contra el hash guardado.
-- Devolver al `Main.py` si el acceso fue exitoso y que rol tiene el usuario.
-
-### `users.json`
-
-Guarda los usuarios iniciales del sistema.
-
-Importante: las contrasenas no estan guardadas en texto plano. Cada usuario tiene:
-
-- `salt`
-- `password_hash`
-
-Esto permite validar contrasenas sin almacenar directamente la contrasena real.
-
-## Cambios realizados
-
-- Se creo el paquete `medicus_privacy` agregando archivos `__init__.py`.
-- Se creo la carpeta `medicus_privacy/modules`.
-- Se implemento `medicus_privacy/modules/auth.py`.
-- Se creo `data/users.json` con usuarios iniciales.
-- Se conecto `Main.py` con `AuthService`.
-- Se elimino el uso normal del mock de autenticacion.
-- Se agrego lectura de contrasena oculta con `getpass`.
-- Se agrego fallback para consolas que no soporten contrasena oculta.
-- Se agregaron los roles oficiales del proyecto:
-  - `Admin`
-  - `Medico`
-  - `Recepcionista`
-  - `Estudiante`
-- Se ajusto la ruta de logs para que siempre apunte a la carpeta `logs` del proyecto.
-
-## Funciones y clases importantes
-
-### `main()`
-
-Ubicacion: `medicus_privacy/Main/Main.py`
-
-Inicia el programa, controla el login y decide a que panel debe entrar el usuario segun su rol.
-
-### `setup_logging()`
-
-Ubicacion: `medicus_privacy/Main/Main.py`
-
-Configura el logger del sistema. Guarda eventos importantes en archivo y tambien los muestra en consola.
-
-### `mostrar_banner()`
-
-Ubicacion: `medicus_privacy/Main/Main.py`
-
-Limpia la pantalla y muestra el nombre, version y descripcion del sistema.
-
-### `solicitar_password()`
-
-Ubicacion: `medicus_privacy/Main/Main.py`
-
-Solicita la contrasena al usuario. Normalmente la oculta en pantalla. Si la consola no permite ocultarla, usa una entrada visible como respaldo.
-
-### `AuthService`
-
-Ubicacion: `medicus_privacy/modules/auth.py`
-
-Clase principal del modulo de autenticacion.
-
-### `AuthService.verificar_credenciales(usuario, password)`
-
-Ubicacion: `medicus_privacy/modules/auth.py`
-
-Funcion principal de Recepcion/Login. Recibe usuario y contrasena.
-
-Si las credenciales son correctas, devuelve:
+La misma contraseña genera hashes diferentes porque cada llamada utiliza una
+sal nueva. Para comprobar una contraseña no se genera otro hash manualmente; se
+usa:
 
 ```python
-(True, rol, datos_usuario)
+from medicus_privacy.modules.seguridad import verificar_password
+
+es_correcta = verificar_password(
+    "ContrasenaTemporal123",
+    password_hash,
+)
 ```
 
-Ejemplo:
+`verificar_password` realiza una comparación en tiempo constante. Además,
+durante un login correcto, `AuthService` actualiza automáticamente los hashes
+heredados que ya no cumplen el número actual de iteraciones.
 
-```python
-(True, "Admin", {
-    "user_id": 1,
-    "nombre": "Admin Sistema",
-    "usuario": "admin",
-    "rol": "Admin"
-})
-```
+Las contraseñas en texto plano solo deben existir mientras se valida o crea la
+cuenta. No deben escribirse en SQLite, logs ni archivos de configuración.
 
-Si las credenciales son incorrectas, devuelve:
+## 🗄 Estructura de la Base de Datos
 
-```python
-(False, None, None)
-```
+### Base activa: `data/medicus_privacy.db`
 
-### `generar_hash_password(password)`
+El sistema utiliza SQLite con esquema versión 2. `DatabaseService` crea y
+migra el esquema automáticamente, activa claves foráneas y administra cada
+conexión con commit, rollback y cierre garantizado.
 
-Ubicacion: `medicus_privacy/modules/auth.py`
+#### Tabla `usuarios`
 
-Funcion auxiliar para generar un `salt` y un `password_hash`. Sirve para crear nuevos usuarios sin guardar contrasenas en texto plano.
+| Campo             | Descripción                                           |
+| ----------------- | ----------------------------------------------------- |
+| `id`              | Identificador interno.                                |
+| `username`        | Nombre de acceso único, sin distinguir mayúsculas.    |
+| `password_hash`   | Hash PBKDF2; nunca contiene la contraseña original.   |
+| `rol`             | Admin, Médico, Recepcionista o Estudiante.            |
+| `nombre_completo` | Nombre mostrado en la interfaz.                       |
+| `especialidad`    | Obligatoria para Médico y Estudiante.                 |
+| `activo`          | Permite desactivar la cuenta sin borrar su historial. |
+| `creado_en`       | Fecha de creación del usuario.                        |
 
-## Usuarios de prueba
+#### Tabla `pacientes`
+
+| Campo                               | Descripción                                     |
+| ----------------------------------- | ----------------------------------------------- |
+| `id`                                | Identificador interno del paciente.             |
+| `cedula`                            | Identificación única normalizada.               |
+| `nombres`, `apellidos`              | Identidad del paciente.                         |
+| `fecha_nacimiento`                  | Permite calcular la edad en tiempo real.        |
+| `sexo`, `nacionalidad`, `direccion` | Datos administrativos.                          |
+| `datos_completos`                   | Indica si un registro migrado debe completarse. |
+| `creado_en`, `actualizado_en`       | Trazabilidad del registro.                      |
+
+El paciente no pertenece a `usuarios`: no posee contraseña ni puede iniciar
+sesión.
+
+#### Tabla `citas`
+
+Relaciona un paciente con un médico y, opcionalmente, un estudiante:
+
+| Campo           | Descripción                                              |
+| --------------- | -------------------------------------------------------- |
+| `medico_id`     | Médico responsable.                                      |
+| `paciente_id`   | Paciente atendido.                                       |
+| `estudiante_id` | Estudiante asignado; puede ser nulo.                     |
+| `fecha`, `hora` | Franja de atención.                                      |
+| `especialidad`  | Especialidad bajo la que se agenda.                      |
+| `estado`        | `Programada`, `Atendida` o `Cancelada`.                  |
+| `motivo_legacy` | Dato conservado únicamente durante migraciones antiguas. |
+
+Los índices parciales impiden que un médico, paciente o estudiante tenga dos
+citas programadas en la misma fecha y hora.
+
+#### Tablas `historias_clinicas` y `evoluciones_clinicas`
+
+`historias_clinicas` mantiene una única historia por paciente.
+`evoluciones_clinicas` conserva cada consulta por separado:
+
+- Cita y médico que registraron la evolución.
+- Altura y peso.
+- Diagnóstico cifrado.
+- Conducta o tratamiento cifrado.
+- Fecha de creación.
+
+Diagnóstico y tratamiento usan AES-256-GCM. La clave clínica se protege fuera
+de SQLite mediante Windows DPAPI.
+
+### Relaciones principales
 
 ```text
-Usuario: admin
-Contrasena: admin123
-Rol: Admin
-
-Usuario: medico
-Contrasena: med123
-Rol: Medico
-
-Usuario: recepcion
-Contrasena: rec123
-Rol: Recepcionista
-
-Usuario: estudiante
-Contrasena: est123
-Rol: Estudiante
+usuarios (Médico) ──< citas >── pacientes
+usuarios (Estudiante) ──< citas
+pacientes ──0..1 historias_clinicas
+historias_clinicas ──< evoluciones_clinicas
+citas ──0..1 evoluciones_clinicas
 ```
 
-## Como ejecutar
+### Archivo heredado: `db_medicus.json`
 
-Desde la carpeta `Medicus-Privacy-main`:
-
-```bash
-python medicus_privacy/Main/Main.py
-```
-
-Al pedir la contrasena, puede que no se vea nada mientras se escribe. Eso es normal: la entrada esta oculta por seguridad. Se escribe la contrasena y se presiona Enter.
-
-## Como verificar que compila
-
-Desde la carpeta `Medicus-Privacy-main`:
-
-```bash
-python -m py_compile medicus_privacy/Main/Main.py medicus_privacy/modules/auth.py
-```
-
-## Proximos pasos sugeridos
-
-- Crear el modulo de Administracion para gestionar usuarios y roles.
-- Crear el modulo de Citas para recepcionista, medico y estudiante.
-- Crear una base de datos real para reemplazar el JSON cuando el proyecto avance.
-- Agregar pruebas automatizadas con `unittest` o `pytest`.
-- Corregir textos con caracteres danados por codificacion en archivos antiguos.
-
-# Medicus-Privacy 🛡️🩺
-
-**Medicus-Privacy** es un sistema modular en Python diseñado para la gestión de usuarios, programación de citas médicas y protección estricta de la privacidad mediante criptografía. El sistema está estructurado bajo una arquitectura de "caja negra" dividida en estaciones de trabajo para facilitar la colaboración en equipo.
-
-Este repositorio contiene la implementación de los tres módulos principales:
-1. **Seguridad e Integridad** (`seguridad.py`)
-2. **Administración de Usuarios** (`admin.py`)
-3. **Gestión de Reservas y Citas** (`citas.py`)
-
----
-
-## 📂 Arquitectura de Archivos
-
-* `seguridad.py`: Proporciona las funciones de criptografía simétrica y hashing de contraseñas.
-* `admin.py`: Gestiona la base de datos de usuarios, altas, bajas, roles y contraseñas.
-* `citas.py`: Gestiona la agenda, verifica disponibilidad médica y encripta datos sensibles.
-* `db_medicus.json`: Archivo de persistencia de datos (base de datos JSON).
-* `test_admin.py` y `test_citas.py`: Scripts de pruebas automatizadas para garantizar la calidad del código.
-
----
-
-## 🛠️ Detalle de los Módulos
-
-### 1. 🔒 Módulo de Seguridad (`seguridad.py`)
-Es la "caja fuerte" del sistema. No tiene dependencias externas y provee seguridad criptográfica robusta.
-
-* **Funciones principales**:
-  * `hash_password(password: str) -> str`: Genera un hash seguro con sal (salt) usando PBKDF2-HMAC-SHA256 para contraseñas.
-  * `verificar_password(password: str, password_hash: str) -> bool`: Compara contraseñas usando algoritmos en tiempo constante contra ataques de canal lateral.
-  * `cifrar_datos(texto: str, clave: str) -> str`: Cifra textos planos (como diagnósticos) con cifrado de flujo simétrico, generando un IV aleatorio y un código MAC (HMAC-SHA256) para asegurar la integridad.
-  * `descifrar_datos(texto_cifrado_b64: str, clave: str) -> str`: Descifra y verifica la integridad del texto. Lanza un `ValueError` si la clave es incorrecta o los datos fueron alterados.
-
----
-
-### 2. 👥 Módulo de Administración (`admin.py`)
-Controla la administración del personal de la clínica y sus roles (`Admin`, `Recep`, `Médico`, `Estudiante`).
-
-* **Funciones de Negocio**:
-  * `crear_usuario(username, password, rol, nombre_completo)`: Registra un usuario y hace hash de su contraseña.
-  * `eliminar_usuario(username)`: Elimina un usuario (protege contra la eliminación del único Administrador).
-  * `listar_usuarios()`: Retorna información básica sin exponer contraseñas.
-  * `actualizar_rol_usuario(username, nuevo_rol)`: Actualiza permisos.
-* **Interfaz de Consola**:
-  * `mostrar_menu_admin()`: Menú interactivo CLI para la gestión rápida de usuarios.
-
----
-
-### 3. 📅 Módulo de Citas y Reservas (`citas.py`)
-Gestiona el calendario, la disponibilidad de los médicos y el agendamiento seguro.
-
-* **Funciones de Negocio**:
-  * `agendar_cita(medico_username, alumno_username, fecha, hora, especialidad, motivo_sensible, clave_seguridad)`: Crea una cita. Si se pasa un motivo, lo cifra con la clave de seguridad a través de `seguridad.py`.
-  * `verificar_disponibilidad(medico_username, fecha, hora)`: Valida colisiones de horario (un médico no puede duplicar citas en el mismo bloque).
-  * `cancelar_cita(cita_id)`: Cancela y libera el horario del médico.
-  * `obtener_citas_filtradas(rol_usuario, username)`: Filtra citas automáticamente según el rol del usuario conectado.
-  * `descifrar_motivo_cita(cita, clave_seguridad)`: Permite descifrar el motivo médico de forma controlada.
-* **Interfaz de Consola**:
-  * `mostrar_menu_citas(username_actual, rol_actual)`: Menú CLI adaptado al rol del usuario (por ejemplo, el Estudiante agenda y ve sus citas; el Médico puede descifrar los diagnósticos introduciendo su clave privada).
-
----
-
-## 🗄️ Estructura de la Base de Datos (`db_medicus.json`)
-
-El archivo JSON almacena los registros estructurados con la siguiente forma:
+`db_medicus.json` pertenece a la versión inicial y ya no es la base activa. Se
+conserva como fuente histórica para migraciones. Su estructura original era:
 
 ```json
 {
   "usuarios": {
     "admin": {
-      "password_hash": "salt$hash_de_prueba",
+      "password_hash": "salt$hash_heredado",
       "rol": "Admin",
       "nombre_completo": "Administrador Principal"
     }
@@ -279,10 +240,10 @@ El archivo JSON almacena los registros estructurados con la siguiente forma:
       "id": "1",
       "medico": "nombre_medico",
       "alumno": "nombre_estudiante",
-      "fecha": "YYYY-MM-DD",
+      "fecha": "AAAA-MM-DD",
       "hora": "HH:MM",
-      "especialidad": "Odontología",
-      "motivo": "TextoCifradoEnBase64...",
+      "especialidad": "Odontologia",
+      "motivo": "TextoCifrado...",
       "cifrado": true,
       "estado": "Programada"
     }
@@ -290,36 +251,151 @@ El archivo JSON almacena los registros estructurados con la siguiente forma:
 }
 ```
 
----
+Al detectar el esquema SQLite anterior, el sistema:
 
-## 🚀 Cómo Ejecutar e Integrar
+1. Crea `data/medicus_privacy.backup-v1-AAAAMMDD-HHMMSS.db`.
+2. Añade especialidad a médicos y estudiantes antiguos.
+3. Convierte los antiguos estudiantes usados como pacientes en registros
+   `LEGACY-<id>` pendientes de completar.
+4. Conserva las citas y sus estados.
 
-### Ejecución de Pruebas Unitarias
-Para validar que todo el backend y cifrado funcionan correctamente, ejecuta:
-```bash
-python test_admin.py
-python test_citas.py
+Ninguna operación nueva escribe en `db_medicus.json`.
+
+## Arquitectura
+
+```text
+medicus_privacy/
++-- gui/
+|   +-- app.py
+|   +-- admin_frame.py
+|   +-- citas_frame.py
+|   +-- patients_frame.py
+|   +-- history_frame.py
+|   +-- widgets.py
++-- modules/
+    +-- database.py
+    +-- admin.py
+    +-- patients.py
+    +-- citas.py
+    +-- clinical.py
+    +-- clinical_crypto.py
+    +-- key_manager.py
+    +-- directory.py
+    +-- catalogs.py
 ```
 
-### Ejecutar Módulos de Forma Autónoma
-Cada módulo cuenta con un bloque ejecutable para pruebas individuales:
-* Ejecutar Administración: `python admin.py`
-* Ejecutar Reservas: `python citas.py`
-* *Nota: Puedes iniciar sesión usando el usuario por defecto `admin` y la contraseña `admin123`.*
+La GUI no contiene SQL, hashing ni cifrado. Cada panel usa servicios
+autorizados con la identidad de `UserSession`.
 
-### Guía de Integración para el Director (`main.py`)
-Para conectar estas piezas en el menú principal (`main.py`), solo debes importar las funciones de interfaz:
+## Cómo verificar que compila
 
-```python
-from admin import mostrar_menu_admin
-from citas import mostrar_menu_citas
+Ejecute los comandos desde `Medicus-Privacy-main` con el entorno virtual
+activado.
 
-# Ejemplo de flujo tras autenticar al usuario:
-if rol == "Admin":
-    # Muestra el panel de administración
-    mostrar_menu_admin()
-elif rol in ["Médico", "Estudiante", "Recep"]:
-    # Muestra la agenda adaptada a sus permisos
-    mostrar_menu_citas(usuario_actual, rol)
+### Compilar todo el paquete
+
+```powershell
+python -m compileall -q medicus_privacy
 ```
 
+Si el comando termina sin mensajes de error, todos los módulos del paquete
+pueden compilarse. La opción `-q` oculta las líneas exitosas.
+
+### Verificar los puntos de entrada principales
+
+```powershell
+python -m py_compile `
+  medicus_privacy\gui\app.py `
+  medicus_privacy\Main\Main.py `
+  medicus_privacy\modules\database.py `
+  medicus_privacy\modules\auth.py `
+  medicus_privacy\modules\seguridad.py
+```
+
+`py_compile` detecta errores de sintaxis en archivos concretos sin iniciar la
+GUI ni modificar la base de datos.
+
+### Validación completa para desarrollo
+
+```powershell
+python -m unittest discover -v
+python -m compileall -q medicus_privacy
+python -m pip check
+```
+
+- `unittest` comprueba reglas de negocio, permisos, migración y cifrado.
+- `compileall` verifica la sintaxis de todos los módulos.
+- `pip check` detecta dependencias incompatibles o incompletas.
+
+La suite utiliza bases `.test_*.db` aisladas y no debe modificar
+`data/medicus_privacy.db`. La validación manual está en
+`..\CHECKLIST_PRUEBAS_GUI.md`.
+
+## Especificaciones del sistema
+
+### Identidad y acceso
+
+- El acceso requiere usuario y contraseña; cada sesión conserva la identidad,
+  el nombre y el rol autenticado.
+- Los roles disponibles son Admin, Médico, Recepcionista y Estudiante.
+- La navegación y las operaciones cambian según el rol, y los servicios vuelven
+  a validar cada permiso aunque una acción se invoque fuera de la GUI.
+- Los pacientes son registros asistenciales y no poseen credenciales ni acceso
+  al sistema.
+
+### Personal y especialidades
+
+- Admin crea, edita, activa y desactiva cuentas del personal.
+- Los perfiles de Médico y Estudiante requieren una especialidad.
+- Las especialidades disponibles son Medicina Interna, Pediatría, Ginecología y
+  Obstetricia, Cardiología, Traumatología y Ortopedia, y Odontología.
+- Al agendar, solo se muestran médicos y estudiantes activos que pertenecen a
+  la especialidad seleccionada.
+
+### Pacientes y citas
+
+- Admin, Recepción y Médico pueden registrar un paciente durante la creación de
+  su primera cita.
+- Cada paciente se identifica mediante una cédula única y conserva nombres,
+  apellidos, fecha de nacimiento, sexo, nacionalidad y dirección.
+- La edad se calcula desde la fecha de nacimiento y no se almacena como un dato
+  fijo.
+- Las citas se seleccionan mediante calendario y horarios entre 07:00 y 19:00
+  en intervalos de 30 minutos.
+- El sistema rechaza fechas u horas pasadas y evita colisiones de médico,
+  paciente o estudiante.
+- Admin y Recepción operan cualquier cita; el Médico agenda y cancela solo sus
+  consultas; el Estudiante únicamente consulta las citas asignadas.
+
+### Historias clínicas
+
+- Cada paciente posee una historia clínica longitudinal con múltiples
+  evoluciones.
+- Cada evolución registra fecha, médico, especialidad, altura, peso,
+  diagnóstico y conducta o tratamiento.
+- Solo el Médico asignado puede crear una evolución a partir de una cita
+  programada; al guardarla, la cita cambia a `Atendida`.
+- Un Médico con relación asistencial puede consultar la historia completa para
+  mantener la continuidad del tratamiento.
+- El Estudiante asignado obtiene acceso de solo lectura después de que la cita
+  sea atendida.
+- Admin y Recepción solo acceden a información administrativa del paciente.
+
+### Seguridad y privacidad
+
+- Las contraseñas se almacenan mediante PBKDF2-HMAC-SHA256 con sal aleatoria.
+- Los diagnósticos y tratamientos se cifran individualmente con AES-256-GCM.
+- La clave clínica es administrada por la aplicación, está protegida mediante
+  Windows DPAPI y no se almacena en SQLite.
+- Los eventos de autenticación y acceso clínico se auditan sin registrar
+  contraseñas, claves, diagnósticos ni tratamientos.
+
+### Interfaz y persistencia
+
+- La interfaz admite modo claro y oscuro, filtros de búsqueda y tablas
+  actualizables sin reiniciar.
+- Los formularios extensos son desplazables y mantienen visibles las acciones
+  Guardar, Agendar, Cancelar o Cerrar.
+- SQLite conserva usuarios, pacientes, citas e historias entre ejecuciones.
+- La migración desde el esquema anterior crea una copia de seguridad antes de
+  transformar los datos.
